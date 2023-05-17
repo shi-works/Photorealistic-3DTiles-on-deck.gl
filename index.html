@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Google 3D tiles example</title>
+    <script src="https://unpkg.com/deck.gl@latest/dist.min.js"></script>
+    <script src="https://unpkg.com/@luma.gl/shadertools@8.5.20/dist/dist.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+        }
+
+        #map {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100%;
+        }
+
+        #credits {
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            padding: 2px;
+            font-size: 15px;
+            color: white;
+            text-shadow: -1px 0 black, 0 1px black, 1px 0 black, 0 -1px black;
+        }
+
+        #credits a {
+            color: white;
+            pointer-events: auto;
+        }
+
+        #control-panel {
+            position: absolute;
+            top: 0;
+            left: 0;
+            margin: 6px;
+            padding: 10px;
+            font-size: 12px;
+            line-height: 1;
+            z-index: 1;
+            background: #fff;
+            font-family: Helvetica, Arial, sans-serif;
+            box-shadow: 0 0 4px rgba(0, 0, 0, 0.15);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="control-panel">
+        <p><b>Shadows</b></p>
+        <div id="time-display"></div>
+        <input type="range" min="0" max="1440" step="5" value="480" id="time-slider" />
+        <p><b>inkEffect</b></p>
+        <div id="inkEffect-display"></div>
+        <input type="range" min="0" max="1" step="0.1" value="0.3" id="inkEffect-slider" />
+    </div>
+    <div id="map"></div>
+    <div id="credits"></div>
+    <script>
+        // 【参考】https://developers.google.com/maps/documentation/tile/use-renderer?hl=ja
+        const GOOGLE_API_KEY = 'AIzaSyBunqvH21z9FY2AOSJf8AO5zSdIpMsneMY';
+        const TILESET_URL = `https://tile.googleapis.com/v1/3dtiles/root.json`;
+        const creditsElement = document.getElementById('credits');
+
+        // 太陽光を作成
+        const sunLight = new deck._SunLight({
+            // timestamp: 1554927200000,
+            color: [255, 255, 255],
+            intensity: 1.0,
+            _shadow: true // 影を生成
+        });
+
+        // 環境光を作成
+        const ambientLight = new deck.AmbientLight({
+            color: [255, 255, 255],
+            intensity: 1.0,
+        });
+
+        // インクエフェクトを作成
+        const inkEffect = new deck.PostProcessEffect(luma.ink, {
+            strength: 0.3
+        });
+
+        // ライティングエフェクトを作成
+        const lightingEffect = new deck.LightingEffect({ ambientLight, sunLight });
+
+        // deck.glのキャンバスを初期化
+        const deckgl = new deck.DeckGL({
+            container: 'map',
+            initialViewState: {
+                latitude: 35.6585805,
+                longitude: 139.7454329,
+                zoom: 16,
+                pitch: 60,
+                height: 200
+            },
+            controller: true,
+            effects: [
+                lightingEffect,
+                inkEffect
+            ],
+            layers: [
+                new deck.Tile3DLayer({
+                    id: 'google-3d-tiles',
+                    data: TILESET_URL,
+                    loadOptions: {
+                        fetch: {
+                            headers: {
+                                'X-GOOG-API-KEY': GOOGLE_API_KEY
+                            }
+                        }
+                    },
+                    onTilesetLoad: tileset3d => {
+                        tileset3d.options.onTraversalComplete = selectedTiles => {
+                            const credits = new Set();
+                            selectedTiles.forEach(tile => {
+                                const { copyright } = tile.content.gltf.asset;
+                                copyright.split(';').forEach(credits.add, credits);
+                                creditsElement.innerHTML = [...credits].join('; ') +
+                                    `&middot; <a href="https://github.com/shi-works/Google-3DTiles-on-deck.gl" target="_blank">GitHub</a>`;
+                            });
+                            return selectedTiles;
+                        }
+                    }
+                })
+            ],
+            // 影を表示
+            parameters: {
+                depthTest: true
+            }
+        });
+
+        // スライダーで太陽光のタイムスタンプを制御
+
+        // スライダーを初期化
+        const timeslider = document.getElementById('time-slider');
+        const timeDisplay = document.getElementById('time-display');
+
+        // スライダーの値から取得した時間をUnixタイムスタンプで返す関数を定義
+        function getTimeFromSliderValue(value) {
+            const hours = Math.floor(value / 60);
+            const minutes = value % 60;
+            const date = new Date(); // 現在の年月日と時間を取得
+            date.setHours(hours, minutes, 0, 0); // 現在の日付に対して時間、分を設定
+            return date.getTime(); // Unixタイムスタンプを返す
+        }
+
+        // スライダーの値が変更されたときに実行するイベントリスナーを追加
+        timeslider.addEventListener('input', (e) => {
+            const value = parseInt(e.target.value, 10);
+            const timestamp = getTimeFromSliderValue(value);
+            // console.log(timestamp);
+            sunLight.timestamp = timestamp; // 取得した時間を太陽光のタイムスタンプとして設定
+            const date = new Date(timestamp);
+            const hours = date.getHours();
+            const minutes = date.getMinutes();
+            timeDisplay.innerHTML = `${hours}:${('' + minutes).padStart(
+                2,
+                '0',
+            )} (Timezone: UTC${date.getTimezoneOffset() < 0 ? '+' : ''}${-date.getTimezoneOffset() / 60
+                })`; // 取得した時間と分を表示
+            deckgl.redraw(true); // シーンを再描画
+        });
+        timeslider.dispatchEvent(new Event('input')); // スライダーのinputイベントを発火
+
+        // スライダーでインクエフェクトの強度を制御
+
+        // スライダーを初期化
+        const inkEffectslider = document.getElementById('inkEffect-slider');
+        const inkEffectDisplay = document.getElementById('inkEffect-display');
+
+        // スライダーの値が変更されたときに実行するイベントリスナーを追加
+        inkEffectslider.addEventListener('input', (e) => {
+            const value = parseFloat(e.target.value);
+            inkEffect.setProps({
+                strength: value// 効果の強度を変更
+            });
+            inkEffectDisplay.innerHTML = value
+            deckgl.redraw(true); // シーンを再描画
+        });
+        inkEffectslider.dispatchEvent(new Event('input')); // スライダーのinputイベントを発火
+
+    </script>
+</body>
+
+</html>
